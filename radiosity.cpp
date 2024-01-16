@@ -30,9 +30,12 @@ inline const Vector Cross(const Vector &v1, const Vector &v2) {
 }
 using Color = Vector;
 constexpr double pi_2 = 1.5707963267948966192313216916398;
-double multiplier_front[128][128];
-double multiplier_down[64][128];
+constexpr int hemicube_res = 256;
 
+double multiplier_front[hemicube_res][hemicube_res];
+double multiplier_down[hemicube_res/2][hemicube_res];
+
+// prospective camera
 class Camera {
 public:
     Vector pos, dir, up;
@@ -52,10 +55,11 @@ public:
     }
 };
 
+// Patches are rectangle
 class Patch {
 public:
     Vector pos;
-    Vector a, b;
+    Vector a, b; // regard Cross(b, a) as normal
     Color emission;
     Color reflectance;
     Color incident;
@@ -67,7 +71,7 @@ public:
 bool inside_quadrilateral(double cx, double cy, Vector a, Vector b, Vector c, Vector d, double &depth) {
     Vector ab = b-a, ac = c-a;
     double tmp = ab.x*ac.y - ab.y*ac.x;
-    if(std::abs(tmp) > 1e-8) {
+    if(std::abs(tmp) > 1e-6) {
         double alpha = (-ac.x*(cy-a.y) + ac.y*(cx-a.x))/tmp;
         double beta = (ab.x*(cy-a.y) - ab.y*(cx-a.x))/tmp;
         if(alpha >= 0 && beta >= 0 && alpha + beta <= 1) {
@@ -77,7 +81,7 @@ bool inside_quadrilateral(double cx, double cy, Vector a, Vector b, Vector c, Ve
     }
     Vector db = b-d, dc = c-d;
     tmp = db.x*dc.y - db.y*dc.x;
-    if(std::abs(tmp) > 1e-8) {
+    if(std::abs(tmp) > 1e-6) {
         double alpha = (-dc.x*(cy-d.y) + dc.y*(cx-d.x))/tmp;
         double beta = (db.x*(cy-d.y) - db.y*(cx-d.x))/tmp;
         if(alpha >= 0 && beta >= 0 && alpha + beta <= 1) {
@@ -88,6 +92,7 @@ bool inside_quadrilateral(double cx, double cy, Vector a, Vector b, Vector c, Ve
     return false;
 }
 
+// rasterization
 Color* render_view(const Camera &camera, const std::vector<Patch> &scene, const int width, const int height) {
     Color *image = new Color[width * height];
     double *zbuffer = new double[width * height];
@@ -95,17 +100,12 @@ Color* render_view(const Camera &camera, const std::vector<Patch> &scene, const 
         image[i] = Color();
         zbuffer[i] = 1000000;
     }
-    #pragma omp parallel for
     for(const auto &p : scene) {
         if(Length(p.pos+0.5*(p.a+p.b)-camera.pos) < 1e-6) continue;
         Vector a = camera.project(p.pos);
-        // std::cout<<a.x<<" "<<a.y<<" "<<a.z<<std::endl;
         Vector b = camera.project(p.pos + p.a);
-        // std::cout<<b.x<<" "<<b.y<<" "<<b.z<<std::endl;
         Vector c = camera.project(p.pos + p.b);
-        // std::cout<<c.x<<" "<<c.y<<" "<<c.z<<std::endl;
         Vector d = camera.project(p.pos + p.a + p.b);
-        // std::cout<<d.x<<" "<<d.y<<" "<<d.z<<std::endl;
         if(a.z<0||b.z<0||c.z<0||d.z<0)continue;
         double px = camera.width / width;
         double py = camera.height / height;
@@ -127,6 +127,7 @@ Color* render_view(const Camera &camera, const std::vector<Patch> &scene, const 
     return image;
 }
 
+// https://stackoverflow.com/a/2654860
 void save_bmp_file(const std::string &filename, const Color *image, const int width, const int height) {
     FILE *f = fopen(filename.c_str(),"wb");
     int filesize = 54 + 3 * width * height;
@@ -143,16 +144,6 @@ void save_bmp_file(const std::string &filename, const Color *image, const int wi
             if (r > 255) r=255;
             if (g > 255) g=255;
             if (b > 255) b=255;
-            // double r = 0., g = 0., b = 0.;
-            // double d = std::max(image[i+j*width].x, std::max(image[i+j*width].y, image[i+j*width].z));
-            // if (d > 1e-32) {
-            //     int e;
-            //     double m = frexp(d, &e); // d = m * 2^e
-            //     d = m * 256.0 / d;
-            //     r = image[i+j*width].x * d;
-            //     g = image[i+j*width].y * d;
-            //     b = image[i+j*width].z * d;
-            // }
             img[(i+j*width)*3+2] = (unsigned char)(r);
             img[(i+j*width)*3+1] = (unsigned char)(g);
             img[(i+j*width)*3+0] = (unsigned char)(b);
@@ -186,27 +177,32 @@ void save_bmp_file(const std::string &filename, const Color *image, const int wi
     delete[] img;
 }
 
+// Cornell Box
 void load_scene(std::vector<Patch> &scene){
-    scene.emplace_back(Patch(Vector(0, 0, 0), Vector(550, 0, 0), Vector(0, 0, 560), Color(), Color(0.5, 0.5, 0.5))); //floor
-    scene.emplace_back(Patch(Vector(210, 549, 230), Vector(0, 0, 100), Vector(130, 0, 0), Color(80, 80, 80), Color(0.78, 0.78, 0.78))); //light source
-    scene.emplace_back(Patch(Vector(0, 550, 0), Vector(0, 0, 560), Vector(550, 0, 0), Color(), Color(0.5, 0.5, 0.5))); //ceiling
-    scene.emplace_back(Patch(Vector(0, 0, 560), Vector(550, 0, 0), Vector(0, 550, 0), Color(), Color(0.5, 0.5, 0.5))); //back
+    scene.emplace_back(Patch(Vector(0, 0, 0), Vector(550, 0, 0), Vector(0, 0, 560), Color(), Color(0.9, 0.9, 0.9))); //floor
+    scene.emplace_back(Patch(Vector(200, 550, 200), Vector(0, 0, 150), Vector(150, 0, 0), Color(100, 100, 100), Color(0.78, 0.78, 0.78))); //light source
+    scene.emplace_back(Patch(Vector(0, 550, 0), Vector(0, 0, 200), Vector(550, 0, 0), Color(), Color(0.9, 0.9, 0.9))); //ceiling
+    scene.emplace_back(Patch(Vector(350, 550, 200), Vector(0, 0, 360), Vector(200, 0, 0), Color(), Color(0.9, 0.9, 0.9))); //ceiling
+    scene.emplace_back(Patch(Vector(0, 550, 200), Vector(0, 0, 360), Vector(200, 0, 0), Color(), Color(0.9, 0.9, 0.9))); //ceiling
+    scene.emplace_back(Patch(Vector(200, 550, 350), Vector(0, 0, 210), Vector(200, 0, 0), Color(), Color(0.9, 0.9, 0.9))); //ceiling
+    scene.emplace_back(Patch(Vector(0, 0, 560), Vector(550, 0, 0), Vector(0, 550, 0), Color(), Color(0.9, 0.9, 0.9))); //back
     scene.emplace_back(Patch(Vector(0, 0, 0), Vector(0, 0, 560), Vector(0, 550, 0), Color(), Color(0, 1, 0))); //right
     scene.emplace_back(Patch(Vector(550, 0, 0), Vector(0, 550, 0), Vector(0, 0, 560), Color(), Color(1, 0, 0))); //left
     //short block
-    scene.emplace_back(Patch(Vector(130, 165, 65), Vector(160, 0, 50), Vector(-50, 0, 160), Color(), Color(0.5, 0.5, 0.5)));
-    scene.emplace_back(Patch(Vector(290, 0, 115), Vector(0, 165, 0), Vector(-50, 0, 160), Color(), Color(0.5, 0.5, 0.5)));
-    scene.emplace_back(Patch(Vector(130, 0, 65), Vector(0, 165, 0), Vector(160, 0, 50), Color(), Color(0.5, 0.5, 0.5)));
-    scene.emplace_back(Patch(Vector(80, 0, 225), Vector(0, 165, 0), Vector(50, 0, -160), Color(), Color(0.5, 0.5, 0.5)));
-    scene.emplace_back(Patch(Vector(240, 0, 275), Vector(0, 165, 0), Vector(-160, 0, -50), Color(), Color(0.5, 0.5, 0.5)));
-    //tall block
-    scene.emplace_back(Patch(Vector(420, 330, 250), Vector(50, 0, 160), Vector(-160, 0, 50), Color(), Color(0.5, 0.5, 0.5)));
-    scene.emplace_back(Patch(Vector(420, 0, 250), Vector(0, 330, 0), Vector(50, 0, 160), Color(), Color(0.5, 0.5, 0.5)));
-    scene.emplace_back(Patch(Vector(470, 0, 410), Vector(0, 330, 0), Vector(-160, 0, 50), Color(), Color(0.5, 0.5, 0.5)));
-    scene.emplace_back(Patch(Vector(310, 0, 460), Vector(0, 330, 0), Vector(-50, 0, -160), Color(), Color(0.5, 0.5, 0.5)));
-    scene.emplace_back(Patch(Vector(260, 0, 300), Vector(0, 330, 0), Vector(160, 0, -50), Color(), Color(0.5, 0.5, 0.5)));
+    scene.emplace_back(Patch(Vector(130, 165, 65), Vector(160, 0, 50), Vector(-50, 0, 160), Color(), Color(0.9, 0.9, 0.9)));
+    scene.emplace_back(Patch(Vector(290, 0, 115), Vector(-50, 0, 160), Vector(0, 165, 0), Color(), Color(0.9, 0.9, 0.9)));
+    scene.emplace_back(Patch(Vector(130, 0, 65), Vector(160, 0, 50), Vector(0, 165, 0), Color(), Color(0.9, 0.9, 0.9)));
+    scene.emplace_back(Patch(Vector(80, 0, 225), Vector(50, 0, -160), Vector(0, 165, 0), Color(), Color(0.9, 0.9, 0.9)));
+    scene.emplace_back(Patch(Vector(240, 0, 275), Vector(-160, 0, -50), Vector(0, 165, 0), Color(), Color(0.9, 0.9, 0.9)));
+    // tall block
+    scene.emplace_back(Patch(Vector(420, 330, 250), Vector(50, 0, 160), Vector(-160, 0, 50), Color(), Color(0.9, 0.9, 0.9)));
+    scene.emplace_back(Patch(Vector(420, 0, 250), Vector(50, 0, 160), Vector(0, 330, 0), Color(), Color(0.9, 0.9, 0.9)));
+    scene.emplace_back(Patch(Vector(470, 0, 410), Vector(-160, 0, 50), Vector(0, 330, 0), Color(), Color(0.9, 0.9, 0.9)));
+    scene.emplace_back(Patch(Vector(310, 0, 460), Vector(-50, 0, -160), Vector(0, 330, 0), Color(), Color(0.9, 0.9, 0.9)));
+    scene.emplace_back(Patch(Vector(260, 0, 300), Vector(160, 0, -50), Vector(0, 330, 0), Color(), Color(0.9, 0.9, 0.9)));
 }
 
+// divide patches into subpatches whose width and length are no less than given threshold
 void divide_patches(std::vector<Patch> &scene, double threshold) {
     std::vector<Patch> tmp = std::move(scene);
     for(const auto &p : tmp) {
@@ -219,55 +215,33 @@ void divide_patches(std::vector<Patch> &scene, double threshold) {
                 Vector pos = p.pos + i*threshold*Normalize(p.a) + j*threshold*Normalize(p.b);
                 Vector pa = (i+1)*threshold > len_a ? p.a-i*threshold*Normalize(p.a) : threshold*Normalize(p.a);
                 Vector pb = (j+1)*threshold > len_b ? p.b-j*threshold*Normalize(p.b) : threshold*Normalize(p.b);
+                if(pa.isZero() || pb.isZero()) continue;
                 scene.emplace_back(Patch(pos, pa, pb, p.emission, p.reflectance));
-                // std::cout<<pos.x<<" "<<pos.y<<" "<<pos.z<<std::endl;
-                // std::cout<<pa.x<<" "<<pa.y<<" "<<pa.z<<std::endl;
             }
         }
     }
 }
 
 void cal_multiplier_map() {
-    constexpr double pw = 2./128;
-    for(int i = 0; i < 128; ++i) {
-        for(int j = 0; j < 128; ++j){
+    constexpr double pw = 2./hemicube_res;
+    for(int i = 0; i < hemicube_res; ++i) {
+        for(int j = 0; j < hemicube_res; ++j){
             double cx = (j + 0.5) * pw - 1;
             double cy = (i + 0.5) * pw - 1;
             multiplier_front[i][j] = 1 / std::sqrt(cx*cx + cy*cy + 1);
         }
     }
-    for(int i = 0; i < 64; ++i) {
-        for(int j = 0; j < 128; ++j){
+    for(int i = 0; i < hemicube_res/2; ++i) {
+        for(int j = 0; j < hemicube_res; ++j){
             double cx = (j + 0.5) * pw - 1;
             double cz = (i + 0.5) * pw;
             multiplier_down[i][j] = cz / std::sqrt(cx*cx + cz*cz +1);
             multiplier_down[i][j] *= multiplier_front[i+64][j];
         }
     }
-    for(int i = 0; i < 128; ++i) {
-        for(int j = 0; j < 128; ++j){
+    for(int i = 0; i < hemicube_res; ++i) {
+        for(int j = 0; j < hemicube_res; ++j){
             multiplier_front[i][j] *= multiplier_front[i][j];
-        }
-    }
-    double sum = 0.;
-    for(int i = 0; i < 128; ++i) {
-        for(int j = 0; j < 128; ++j){
-            sum += multiplier_front[i][j];
-        }
-    }
-    for(int i = 0; i < 64; ++i) {
-        for(int j = 0; j < 128; ++j){
-            sum += 4*multiplier_down[i][j];
-        }
-    }
-    for(int i = 0; i < 128; ++i) {
-        for(int j = 0; j < 128; ++j){
-            multiplier_front[i][j] /= sum;
-        }
-    }
-    for(int i = 0; i < 64; ++i) {
-        for(int j = 0; j < 128; ++j){
-            multiplier_down[i][j] /= sum;
         }
     }
 }
@@ -276,23 +250,22 @@ void cal_incident_light(std::vector<Patch> &scene) {
     #pragma omp parallel for
     for(auto &p : scene) {
         Vector cpos = p.pos+0.5*(p.a+p.b);
-        Color *front = render_view(Camera(cpos, Normalize(Cross(p.b, p.a)), Normalize(p.b), pi_2), scene, 128, 128);
-        Color *up = render_view(Camera(cpos, Normalize(p.b), -Normalize(Cross(p.b, p.a)), pi_2), scene, 128, 128);
-        Color *left = render_view(Camera(cpos, -Normalize(p.a), Normalize(p.b), pi_2), scene, 128, 128);
-        Color *right = render_view(Camera(cpos, Normalize(p.a), Normalize(p.b), pi_2), scene, 128, 128);
-        Color *down = render_view(Camera(cpos, -Normalize(p.b), Normalize(Cross(p.b, p.a)), pi_2), scene, 128, 128);
+        Color *front = render_view(Camera(cpos, Normalize(Cross(p.b, p.a)), Normalize(p.b), pi_2), scene, hemicube_res, hemicube_res);
+        Color *up = render_view(Camera(cpos, Normalize(p.b), -Normalize(Cross(p.b, p.a)), pi_2), scene, hemicube_res, hemicube_res);
+        Color *left = render_view(Camera(cpos, -Normalize(p.a), Normalize(p.b), pi_2), scene, hemicube_res, hemicube_res);
+        Color *right = render_view(Camera(cpos, Normalize(p.a), Normalize(p.b), pi_2), scene, hemicube_res, hemicube_res);
+        Color *down = render_view(Camera(cpos, -Normalize(p.b), Normalize(Cross(p.b, p.a)), pi_2), scene, hemicube_res, hemicube_res);
         Color total_light{};
-        for(int i = 0; i < 128; ++i){
-            for(int j = 0; j < 128; ++j){
-                total_light = total_light + front[i*128+j]*multiplier_front[i][j];
-                if(i<64) total_light = total_light + up[i*128+j]*multiplier_down[63-i][j];
-                if(i>=64) total_light = total_light + down[i*128+j]*multiplier_down[i-64][j];
-                if(j<64) total_light = total_light + right[i*128+j]*multiplier_down[63-j][i];
-                if(j>=64) total_light = total_light + left[i*128+j]*multiplier_down[j-64][i];
+        for(int i = 0; i < hemicube_res; ++i){
+            for(int j = 0; j < hemicube_res; ++j){
+                total_light = total_light + front[i*hemicube_res+j]*multiplier_front[i][j];
+                if(i<hemicube_res/2) total_light = total_light + up[i*hemicube_res+j]*multiplier_down[hemicube_res/2-1-i][j];
+                if(i>=hemicube_res/2) total_light = total_light + down[i*hemicube_res+j]*multiplier_down[i-hemicube_res/2][j];
+                if(j<hemicube_res/2) total_light = total_light + right[i*hemicube_res+j]*multiplier_down[hemicube_res/2-1-j][i];
+                if(j>=hemicube_res/2) total_light = total_light + left[i*hemicube_res+j]*multiplier_down[j-hemicube_res/2][i];
             }
         }
-        p.incident = total_light;
-        // std::cout<<"incident light"<<p.incident.x<<" "<<p.incident.y<<" "<<p.incident.z<<std::endl;
+        p.incident = total_light / (3*hemicube_res*hemicube_res);
         delete[] front;
         delete[] up;
         delete[] left;
@@ -302,6 +275,7 @@ void cal_incident_light(std::vector<Patch> &scene) {
 }
 
 void cal_excident_light(std::vector<Patch> &scene) {
+    #pragma omp parallel for
     for(auto &p : scene) {
         p.excident = Multiply(p.incident, p.reflectance) + p.emission;
     }
@@ -316,7 +290,7 @@ int main() {
     load_scene(scene);
 
     std::cout << "divide patches" << std::endl;
-    divide_patches(scene, 10);
+    divide_patches(scene, 50);
     std::cout << "total patch number: "<< scene.size() << std::endl;
 
     int iter = 0;
@@ -329,7 +303,7 @@ int main() {
 
     cal_multiplier_map();
 
-    const int max_iteration = 4;
+    const int max_iteration = 5;
     for(iter = 1; iter <= max_iteration; ++iter){
         cal_incident_light(scene);
         cal_excident_light(scene);
