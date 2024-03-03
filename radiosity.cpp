@@ -106,7 +106,7 @@ Color* render_view(const Camera &camera, const std::vector<Patch> &scene, const 
         Vector b = camera.project(p.pos + p.a);
         Vector c = camera.project(p.pos + p.b);
         Vector d = camera.project(p.pos + p.a + p.b);
-        if(a.z<0||b.z<0||c.z<0||d.z<0)continue;
+        if(a.z<1e-6||b.z<1e-6||c.z<1e-6||d.z<1e-6)continue;
         double px = camera.width / width;
         double py = camera.height / height;
         for(int i = 0; i < height; ++i) {
@@ -236,7 +236,7 @@ void cal_multiplier_map() {
             double cx = (j + 0.5) * pw - 1;
             double cz = (i + 0.5) * pw;
             multiplier_down[i][j] = cz / std::sqrt(cx*cx + cz*cz +1);
-            multiplier_down[i][j] *= multiplier_front[i+64][j];
+            multiplier_down[i][j] *= multiplier_front[i+hemicube_res/2][j];
         }
     }
     for(int i = 0; i < hemicube_res; ++i) {
